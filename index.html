@@ -809,20 +809,9 @@ document.addEventListener("DOMContentLoaded",()=>{const sideName=document.getEle
 .voice-card .heard{font-size:13px;opacity:.82;margin-top:4px}.voice-help{font-size:11px;opacity:.7;margin-top:7px}
 @keyframes voicePulse{0%,100%{box-shadow:0 0 0 0 rgba(220,53,69,.42)}50%{box-shadow:0 0 0 15px rgba(220,53,69,0)}}
 @media(max-width:576px){.voice-fab{right:14px;bottom:14px;width:58px;height:58px}.voice-status{right:12px;bottom:82px}}
-
-.voice-diagnostics{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.48);display:flex;align-items:center;justify-content:center;padding:18px}.voice-diagnostics[hidden]{display:none}.voice-dx-card{width:min(520px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:18px;box-shadow:0 25px 70px rgba(0,0,0,.3);padding:18px}.voice-dx-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.voice-dx-head button{border:0;background:transparent;font-size:28px;line-height:1;cursor:pointer}.voice-dx-sub{font-size:12px;color:#6c757d;margin-top:3px}.voice-dx-rows{margin-top:14px;border:1px solid #e9ecef;border-radius:12px;overflow:hidden}.voice-dx-row{display:grid;grid-template-columns:150px 1fr;gap:10px;padding:10px 12px;border-bottom:1px solid #eef0f2;font-size:12px}.voice-dx-row:last-child{border-bottom:0}.voice-dx-label{font-weight:700;color:#495057}.voice-dx-value{word-break:break-word}.dx-ok{color:#198754;font-weight:700}.dx-warn{color:#b26a00;font-weight:700}.dx-bad{color:#dc3545;font-weight:700}.voice-dx-advice{margin-top:12px;padding:11px 12px;border-radius:10px;background:#fff8e6;font-size:12px;line-height:1.45}.voice-dx-actions{display:flex;gap:8px;margin-top:12px}.voice-dx-actions button{border:0;border-radius:9px;padding:9px 13px;background:#F5A207;color:#fff;font-weight:600}.voice-dx-actions button+button{background:#343a40}
 </style>
 <button id="voiceFab" class="voice-fab" type="button" title="Voice Assistant" aria-label="Voice Assistant" onclick="toggleVoiceAssistant()">🎙️</button>
-<div id="voiceStatus" class="voice-status" aria-live="polite"><div class="voice-card"><b id="voiceStatusTitle">Voice Assistant</b><div id="voiceStatusText">Tap the microphone and speak a command.</div><div id="voiceHeard" class="heard"></div><div class="voice-help">Try: “Open dashboard”, “Punch in”, “Create new client”, “Show my sales”, “Save this entry”, “Go back”. <button type="button" style="border:0;background:none;color:#ffc107;padding:0;font-size:11px" onclick="runVoiceDiagnostics()">Diagnostics</button></div></div></div>
-<div id="voiceDiagnostics" class="voice-diagnostics" aria-live="polite" hidden>
-  <div class="voice-dx-card">
-    <div class="voice-dx-head"><div><b>🎙️ Voice Diagnostics</b><div class="voice-dx-sub">Automatic microphone and browser environment check</div></div><button type="button" onclick="closeVoiceDiagnostics()" aria-label="Close">×</button></div>
-    <div id="voiceDxRows" class="voice-dx-rows"></div>
-    <div id="voiceDxAdvice" class="voice-dx-advice"></div>
-    <div class="voice-dx-actions"><button type="button" onclick="runVoiceDiagnostics()">Recheck</button><button type="button" onclick="openVoiceDiagnosticsHelp()">How to fix</button></div>
-  </div>
-</div>
-
+<div id="voiceStatus" class="voice-status" aria-live="polite"><div class="voice-card"><b id="voiceStatusTitle">Voice Assistant</b><div id="voiceStatusText">Tap the microphone and speak a command.</div><div id="voiceHeard" class="heard"></div><div id="voiceDiagnostics" class="voice-help"></div><div class="voice-help">Try: “Open dashboard”, “Punch in”, “Create new client”, “Show my sales”, “Save this entry”, “Go back”.</div></div></div>
 
 <script id="voice-assistant-engine">
 /* ================= GLOBAL VOICE ASSISTANT V11 ================= */
@@ -875,76 +864,88 @@ document.addEventListener("DOMContentLoaded",()=>{const sideName=document.getEle
     status('Command not recognized','Try “open dashboard”, “create new client”, “punch in”, “search client ABC”, or “save this entry”.',raw);speak('I did not understand that command.');
   }
   function voiceEnvironment(){
-    const protocol=location.protocol||'';
-    const origin=location.origin||'';
-    const href=location.href||'';
-    const embedded=window.top!==window.self;
-    const contentOrigin=origin==='null' || /^content:/i.test(protocol) || /^content:/i.test(href);
-    const fileOrigin=protocol==='file:';
-    const secure=!!window.isSecureContext || protocol==='https:' || location.hostname==='localhost' || location.hostname==='127.0.0.1';
-    return {protocol,origin,href,embedded,contentOrigin,fileOrigin,secure};
+    const protocol=String(location.protocol||'');
+    const origin=String(location.origin||'');
+    const href=String(location.href||'');
+    const isContent=protocol==='content:'||origin==='null'&&href.indexOf('content:')===0;
+    const isFile=protocol==='file:';
+    const isHttp=protocol==='http:';
+    const isHttps=protocol==='https:';
+    const isIframe=window.top!==window.self;
+    return {protocol,origin,href,isContent,isFile,isHttp,isHttps,isIframe,secure:!!window.isSecureContext,supported:!!(window.SpeechRecognition||window.webkitSpeechRecognition)};
   }
-  async function getVoicePermissionState(){
-    if(navigator.permissions&&navigator.permissions.query){
-      try{const p=await navigator.permissions.query({name:'microphone'});return p.state||'unknown';}catch(_e){}
-    }
-    return 'unknown';
+  function renderVoiceDiagnostics(){
+    const e=voiceEnvironment();
+    const perm=(navigator.permissions&&navigator.permissions.query)?'checking…':'not exposed';
+    const box=q('voiceDiagnostics');
+    if(!box)return;
+    box.innerHTML='<details><summary>Voice diagnostics</summary>'+
+      '<div style="margin-top:6px;line-height:1.55">'+
+      'Origin: <b>'+String(e.origin||e.protocol||'unknown').replace(/</g,'&lt;')+'</b><br>'+
+      'Protocol: <b>'+e.protocol+'</b><br>'+
+      'Secure context: <b>'+ (e.secure?'Yes':'No') +'</b><br>'+
+      'Speech Recognition: <b>'+ (e.supported?'Available':'Unavailable') +'</b><br>'+
+      'Embedded frame: <b>'+ (e.isIframe?'Yes':'No') +'</b><br>'+
+      'Permission API: <b>'+perm+'</b>'+ 
+      '</div></details>';
   }
-  async function runVoiceDiagnostics(){
-    const e=voiceEnvironment(), perm=await getVoicePermissionState();
-    const rows=[];
-    const add=(label,value,cls='')=>rows.push(`<div class="voice-dx-row"><div class="voice-dx-label">${label}</div><div class="voice-dx-value ${cls}">${value}</div></div>`);
-    add('Browser',`${navigator.userAgent||'Unknown'}`);
-    add('Page protocol',e.protocol||'Unknown',e.secure?'dx-ok':'dx-bad');
-    add('Page origin',e.origin||'null',e.contentOrigin?'dx-warn':(e.secure?'dx-ok':''));
-    add('Speech Recognition',VOICE.supported?'Available':'Not available',VOICE.supported?'dx-ok':'dx-bad');
-    add('Microphone permission',perm,perm==='granted'?'dx-ok':perm==='denied'?'dx-bad':'dx-warn');
-    add('Embedded / iframe',e.embedded?'Yes':'No',e.embedded?'dx-warn':'dx-ok');
-    add('Secure context',e.secure?'Yes':'No',e.secure?'dx-ok':'dx-bad');
-    add('MediaDevices API',navigator.mediaDevices?'Available':'Unavailable',navigator.mediaDevices?'dx-ok':'dx-warn');
-    let advice='';
-    if(e.contentOrigin){advice='<b>Downloaded-file mode detected.</b> Chrome is running this HTML under <code>content://downloads</code> (or another content origin). The microphone permission for a normal HTTPS site does not apply to this origin. Do not change Chrome permissions again. Open the deployed application using its HTTPS web address. The application cannot turn a content:// download preview into an HTTPS origin.';}
-    else if(e.fileOrigin){advice='<b>Local file detected.</b> Open the deployed HTTPS application instead of opening index.html from Downloads.';}
-    else if(e.embedded){advice='<b>Embedded preview detected.</b> Open the application directly in a Chrome tab; embedded previews/WebViews can restrict Speech Recognition.';}
-    else if(!e.secure){advice='<b>Secure connection required.</b> Use the deployed HTTPS address.';}
-    else if(!VOICE.supported){advice='<b>Speech Recognition is unavailable.</b> Use a current Chrome/Edge browser that exposes SpeechRecognition.';}
-    else if(perm==='denied'){advice='<b>Permission is actually denied for this page origin.</b> Open Chrome Site settings for this exact HTTPS address, set Microphone to Allow, then reload.';}
-    else {advice='<b>Environment looks usable.</b> Tap Recheck and then the microphone. If Chrome raises a permission prompt, choose Allow.';}
-    q('voiceDxRows').innerHTML=rows.join('');q('voiceDxAdvice').innerHTML=advice;q('voiceDiagnostics').hidden=false;
-    return {env:e,permission:perm};
-  }
-  window.runVoiceDiagnostics=runVoiceDiagnostics;
-  window.closeVoiceDiagnostics=()=>{q('voiceDiagnostics').hidden=true};
-  window.openVoiceDiagnosticsHelp=()=>{const e=voiceEnvironment(); if(e.contentOrigin||e.fileOrigin||e.embedded){speak('Please open the deployed HTTPS application directly in Chrome, not from Downloads or an embedded preview.');}else{speak('Check the microphone permission for this exact website in Chrome Site settings, then reload.');}};
   async function requestMicrophonePermission(){
     const e=voiceEnvironment();
-    if(e.contentOrigin)return {ok:false,reason:'content'};
-    if(e.fileOrigin)return {ok:false,reason:'file'};
-    if(e.embedded)return {ok:false,reason:'frame'};
-    if(!e.secure)return {ok:false,reason:'insecure'};
-    const perm=await getVoicePermissionState();
-    if(perm==='denied')return {ok:false,reason:'denied'};
-    return {ok:true,reason:perm};
+    /* A content://downloads or file:// page is not a normal web origin.
+       Chrome may have microphone permission enabled for the deployed site,
+       but that permission does not apply to the Downloads/file viewer. */
+    if(e.isContent) return {ok:false,reason:'downloads'};
+    if(e.isFile) return {ok:false,reason:'file'};
+    if(e.isHttp && !['localhost','127.0.0.1'].includes(location.hostname)) return {ok:false,reason:'insecure'};
+    if(e.isIframe) return {ok:false,reason:'frame'};
+    if(!e.supported) return {ok:false,reason:'unsupported'};
+    if(navigator.permissions&&navigator.permissions.query){
+      try{
+        const perm=await navigator.permissions.query({name:'microphone'});
+        if(perm.state==='denied') return {ok:false,reason:'denied'};
+        if(perm.state==='granted') return {ok:true,reason:'granted'};
+      }catch(_e){}
+    }
+    /* Do not call getUserMedia here. SpeechRecognition should request its own
+       microphone permission on supported Chrome deployments. */
+    return {ok:true,reason:'speech-only'};
   }
   function microphoneHelp(reason){
-    const e=voiceEnvironment(), origin=e.origin||'this page';
-    if(reason==='content'){status('Downloaded file detected','This HTML is running from Chrome Downloads as content://downloads. Chrome permissions for your HTTPS website do not apply here. Open the deployed HTTPS application directly in Chrome.');speak('This file is running from Downloads. Please open the deployed HTTPS application directly in Chrome.');runVoiceDiagnostics();}
-    else if(reason==='file'){status('Local file detected','Open the deployed HTTPS application instead of opening index.html from Downloads.');speak('Please open the deployed HTTPS application over HTTPS.');runVoiceDiagnostics();}
-    else if(reason==='unsupported'){status('Microphone unavailable','This browser does not expose microphone access. Open this application directly in Chrome or Edge.');speak('Microphone access is not available in this browser. Please open the application directly in Chrome.');}
-    else if(reason==='insecure'){status('Secure connection required','Voice microphone access requires HTTPS. Open the deployed HTTPS address of this application.');speak('Voice microphone access requires a secure HTTPS connection.');runVoiceDiagnostics();}
-    else if(reason==='denied'){status('Microphone permission denied','Chrome reports that microphone permission is denied for '+origin+'. Recheck permission for this exact HTTPS site, then reload Chrome.');speak('Chrome reports that microphone permission is denied for this site.');runVoiceDiagnostics();}
-    else if(reason==='frame'){status('Embedded preview detected','Open the application directly in a Chrome tab instead of an embedded preview or WebView.');speak('Please open the application directly in Chrome instead of an embedded preview.');runVoiceDiagnostics();}
-    else{status('Microphone unavailable','Voice recognition could not access the microphone. Check the diagnostics for the exact browser environment.');speak('The microphone could not be accessed. I will show diagnostics.');runVoiceDiagnostics();}
+    const e=voiceEnvironment();
+    renderVoiceDiagnostics();
+    if(reason==='downloads'){
+      status('Open the application website','This HTML is running from Chrome Downloads (content://downloads). Chrome does not apply your website microphone permission to this Downloads viewer. Deploy/open the application from its HTTPS web address, then use the microphone there.');
+      speak('Please open the application from its HTTPS website, not from Chrome Downloads.');
+    }else if(reason==='file'){
+      status('Open the application website','This HTML is running as a local file. Voice microphone access requires the deployed HTTPS application URL.');
+      speak('Please open the application from its secure website.');
+    }else if(reason==='unsupported'){
+      status('Voice unavailable','This browser does not expose Speech Recognition. Open the deployed application directly in current Chrome or Edge.');
+      speak('Voice recognition is not available in this browser.');
+    }else if(reason==='insecure'){
+      status('Secure connection required','Open the deployed HTTPS address of this application. Voice microphone access is not available from an ordinary HTTP page.');
+      speak('Voice microphone access requires a secure HTTPS connection.');
+    }else if(reason==='frame'){
+      status('Open directly in Chrome','This application is inside an embedded/restricted frame. Open its HTTPS URL directly in Chrome instead of a preview, iframe, or file viewer.');
+      speak('Please open the application directly in Chrome.');
+    }else if(reason==='denied'){
+      status('Microphone permission denied','Chrome has denied microphone access for this page origin: '+(e.origin||e.protocol)+'. Check Chrome Site settings for that exact web address and reload.');
+      speak('Microphone permission is denied for this web page.');
+    }else{
+      status('Microphone unavailable','Speech Recognition could not access the microphone. Open the deployed HTTPS application directly in Chrome and try again.');
+      speak('The microphone could not be accessed.');
+    }
   }
-  function setup(){if(!VOICE.supported){q('voiceFab').style.display='none';return}const r=new SR();r.continuous=false;r.interimResults=true;r.maxAlternatives=1;r.lang=VOICE.language;VOICE.recognition=r;
+  function setup(){renderVoiceDiagnostics();if(!VOICE.supported){q('voiceFab').style.display='none';return}const r=new SR();r.continuous=false;r.interimResults=true;r.maxAlternatives=1;r.lang=VOICE.language;VOICE.recognition=r;
     r.onstart=()=>{VOICE.listening=true;VOICE.processing=false;setState('listening');status('Listening','Speak your command now.');};
     r.onresult=e=>{let final='',interim='';for(let i=e.resultIndex;i<e.results.length;i++){const tx=e.results[i][0].transcript;if(e.results[i].isFinal)final+=tx;else interim+=tx}if(interim)q('voiceHeard').textContent='Hearing: “'+interim+'”';if(final){VOICE.processing=true;setState('processing');status('Processing','Working on your command…',final);Promise.resolve(execute(final)).finally(()=>{VOICE.processing=false;VOICE.listening=false;setState('idle')})}};
-    r.onerror=e=>{VOICE.listening=false;VOICE.processing=false;setState('idle');const err=e&&e.error||'';if(err==='not-allowed'||err==='service-not-allowed')microphoneHelp('denied');else if(err==='audio-capture')microphoneHelp('error');else status('Voice error',err||'Please try again.');};
+    r.onerror=e=>{VOICE.listening=false;VOICE.processing=false;setState('idle');renderVoiceDiagnostics();const err=e&&e.error||'';const env=voiceEnvironment();if(env.isContent)microphoneHelp('downloads');else if(env.isFile)microphoneHelp('file');else if(err==='not-allowed'||err==='service-not-allowed')microphoneHelp('denied');else if(err==='audio-capture')microphoneHelp('error');else status('Voice error',err||'Please try again.');};
     r.onend=()=>{VOICE.listening=false;if(!VOICE.processing)setState('idle')};
   }
   window.toggleVoiceAssistant=async function(){
-    if(!VOICE.supported){status('Voice unavailable','This browser does not support Speech Recognition. Open the application in Chrome or Edge and allow microphone access.');return}
+    if(!VOICE.supported){microphoneHelp('unsupported');return}
     if(VOICE.listening){try{VOICE.recognition.stop()}catch(_e){}return}
+    renderVoiceDiagnostics();
     const permission=await requestMicrophonePermission();
     if(!permission.ok){microphoneHelp(permission.reason);return}
     try{
@@ -953,8 +954,6 @@ document.addEventListener("DOMContentLoaded",()=>{const sideName=document.getEle
     }catch(e){
       if(e&&e.name==='NotAllowedError')microphoneHelp('denied');
       else if(e&&e.name==='SecurityError')microphoneHelp('insecure');
-      else if(voiceEnvironment().contentOrigin)microphoneHelp('content');
-      else if(voiceEnvironment().fileOrigin)microphoneHelp('file');
       else status('Voice busy','Please wait a moment and try again.');
     }
   };
